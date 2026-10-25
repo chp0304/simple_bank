@@ -6,14 +6,19 @@ import (
 	"fmt"
 )
 
+type Store interface {
+	Querier
+	TransferTx(ctx context.Context, params TransferTxParams) (TransferTxResult, error)
+}
+
 // Store provides all functions to execute SQL queries and transactions
-type Store struct {
+type SQLStore struct {
 	*Queries
 	db *sql.DB
 }
 
-func NewStore(db *sql.DB) *Store {
-	return &Store{
+func NewStore(db *sql.DB) Store {
+	return &SQLStore{
 		db:      db,
 		Queries: New(db),
 	}
@@ -22,7 +27,7 @@ func NewStore(db *sql.DB) *Store {
 var txKey = struct{}{}
 
 // execTx executes a transactional function with the given context and queries.
-func (store *Store) execTx(ctx context.Context, fn func(*Queries) error) error {
+func (store *SQLStore) execTx(ctx context.Context, fn func(*Queries) error) error {
 	tx, err := store.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -53,13 +58,10 @@ type TransferTxResult struct {
 }
 
 // Transfer transfers an amount from one account to another.
-func (store *Store) TransferTx(ctx context.Context, params TransferTxParams) (TransferTxResult, error) {
+func (store *SQLStore) TransferTx(ctx context.Context, params TransferTxParams) (TransferTxResult, error) {
 	var result TransferTxResult
 	err := store.execTx(ctx, func(q *Queries) error {
 		var err error
-
-		txName := ctx.Value(txKey)
-		fmt.Println(txName, "create transfer")
 
 		result.Transfer, err = q.CreateTransfer(ctx, CreateTransferParams{
 			FromAccountID: params.FromAccountID,
@@ -69,7 +71,6 @@ func (store *Store) TransferTx(ctx context.Context, params TransferTxParams) (Tr
 		if err != nil {
 			return err
 		}
-		fmt.Println(txName, "create entry1")
 
 		result.FromEntry, err = q.CreateEntry(ctx, CreateEntryParams{
 			AccountID: params.FromAccountID,
@@ -78,7 +79,6 @@ func (store *Store) TransferTx(ctx context.Context, params TransferTxParams) (Tr
 		if err != nil {
 			return err
 		}
-		fmt.Println(txName, "create entry2")
 		result.ToEntry, err = q.CreateEntry(ctx, CreateEntryParams{
 			AccountID: params.ToAccountID,
 			Amount:    params.Amount,
@@ -86,7 +86,6 @@ func (store *Store) TransferTx(ctx context.Context, params TransferTxParams) (Tr
 		if err != nil {
 			return err
 		}
-		fmt.Println(txName, "update account1")
 		if params.FromAccountID < params.ToAccountID {
 			result.FromAccount, result.ToAccount, err = addMoney(ctx, q, params.FromAccountID, -params.Amount, params.ToAccountID, params.Amount)
 		} else {
